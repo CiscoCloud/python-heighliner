@@ -1,0 +1,12 @@
+# TODO: We are pulling in the roles from cis-tools right now, and this works
+# because of the way the ansible.cfg is set on the build server. Eventually
+# we may want to migrate the roles into heighliner as it is the interface for
+# tenants that allows SDLC to maintain control over base provision state. This
+# allows us to ensure admins always have credentials on the instances.
+- hosts: "{{ target }}"
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ["vars/{{ os_family }}.yml", "vars/default.yml"]
+  tasks:
+    - { include: nova/provision.yml, when: type == 'virtual' }

@@ -1,0 +1,298 @@
+#!/usr/bin/python
+
+import json
+import os
+try:
+    import requests
+except ImportError:
+    print("failed=True msg='requests module is required'")
+
+
+def _get_exit_response(response):
+    try:
+        data = json.dumps(response.text)
+        res = data['description']
+    except:
+        res = "code=%s" % response.status_code
+    return "Error: %s" % res
+
+
+def _delete_repo(base_url, repo_id, module):
+    url = "%s/pulp/api/v2/repositories/%s/" % (base_url, repo_id)
+    auth=(module.params.get('user'), module.params.get('password'))
+    res = requests.delete(url, verify=False, auth=auth)
+    if res.status_code != 202:
+        module.fail_json(msg="_delete_repo failed: http code %s" % _get_exit_response(res))
+    href = res.json()['spawned_tasks'][0]['_href']
+    while _check_task_status(href, base_url, module) != 'finished':
+        time.sleep(1)
+
+    return
+
+
+def _publish_repo(repo, base_url, module):
+    # Publish the repo
+    url = "%s/pulp/api/v2/repositories/%s/actions/publish/" % (base_url, repo)
+    auth=(module.params.get('user'), module.params.get('password'))
+    payload = { 'id': 'yum_distributor' }
+    res = requests.post(url, data=json.dumps(payload), verify=False, auth=auth)
+    href = res.json()['spawned_tasks'][0]['_href']
+    while _check_task_status(href, base_url, module) != 'finished':
+        time.sleep(1)
+
+    if res.status_code != 202:
+        module.fail_json(msg="_publish_repo failed: http code %s" % _get_exit_response(res))
+
+    return dict()
+
+
+def _get_task_status(task_href, base_url, module):
+    # Retrieve the task status
+    auth=(module.params.get('user'), module.params.get('password'))
+    url = base_url + task_href
+    res = requests.get(url, verify=False, auth=auth)
+    res = res.json()
+    return res
+
+
+def _check_task_status(task_href, base_url, module):
+    res = _get_task_status(task_href, base_url, module)
+
+    if res['state'] == 'error':
+        if 'traceback' in res.keys():
+            print res['traceback']
+        else:
+            module.fail_json(msg='Unknown error')
+    elif res['state'] == 'finished' and res['result']:
+        if res['result'].get('details'):
+            if type(res['result']['details']) == list:
+                return res['state']
+            if 'errors' in res['result']['details'].keys():
+                msg = "\n".join(res['result']['details']['errors'])
+                module.fail_json(msg='Task could not complete %s' % msg)
+
+    return res['state']
+
+
+def _get_repo(base_url, repo_id, module):
+    url = "%s/pulp/api/v2/repositories/%s/?details=true" % (base_url, repo_id)
+    auth=(module.params.get('user'), module.params.get('password'))
+    res = requests.get(url, verify=False, auth=auth)
+    if res.status_code == 200:
+        result = json.loads(res.text)
+        if 'id' in result.keys() and result['id'] == repo_id:
+            return result, res
+    else:
+        return False, res
+
+
+def _unassociate_units(repo, criteria, base_url, module):
+    if criteria is None:
+        return
+
+    auth=(module.params.get('user'), module.params.get('password'))
+
+    url = "%s/pulp/api/v2/repositories/%s/actions/unassociate/" % (base_url, repo)
+
+    payload = {
+        "criteria": {
+            "type_ids": ["rpm", "erratum"],
+            "filters": {
+                "unit": criteria,
+            }
+        }
+    }
+
+    res = requests.post(url, data=json.dumps(payload), verify=False, auth=auth)
+
+    if res.status_code != 202:
+        module.fail_json(msg="_unassociate_units failed: http code %s" % _get_exit_response(res))
+        return
+
+    href = res.json()['spawned_tasks'][0]['_href']
+
+    while _check_task_status(href, base_url, module) != 'finished':
+        time.sleep(1)
+
+    result = _get_task_status(href, base_url, module)
+    if result['result'].get('units_successful'):
+        unit_count = len(result['result']['units_successful'])
+    else:
+        unit_count = 0
+
+    empty_result_fails = module.boolean(module.params.get('empty_exclude_result_fails'))
+    if unit_count <= 0 and empty_exclude_result_fails:
+        module.fail_json(msg="Empty results for exclude criteria!")
+
+    return
+
+
+def _associate_units(source_repo, dest_repo, criteria, include_dependencies, base_url, module):
+    auth=(module.params.get('user'), module.params.get('password'))
+    url = "%s/pulp/api/v2/repositories/%s/actions/associate/" % (base_url, dest_repo)
+
+    if include_dependencies is None:
+        include_dependencies = False
+
+    payload = {
+        "source_repo_id" : source_repo,
+        "criteria": {
+            "type_ids": ["rpm", "erratum"],
+            "filters": {
+                "unit": criteria,
+            }
+        },
+        "override_config": {
+            "recursive": include_dependencies
+        }
+    }
+
+    res = requests.post(url, data=json.dumps(payload), verify=False, auth=auth)
+
+    if res.status_code != 202:
+        module.fail_json(msg="_associate_units failed: http code %s" % _get_exit_response(res))
+        return
+
+    href = res.json()['spawned_tasks'][0]['_href']
+
+    while _check_task_status(href, base_url, module) != 'finished':
+        time.sleep(1)
+
+    result = _get_task_status(href, base_url, module)
+
+    if result['result']:
+        unit_count = len(result['result']['units_successful'])
+    else:
+        unit_count = 0
+
+    empty_result_fails = module.boolean(module.params.get('empty_include_result_fails'))
+
+    if unit_count <= 0 and empty_result_fails:
+        module.fail_json(msg="Empty results for include criteria! %s" % source_repo)
+
+    return
+
+
+def _create_repo(repo_id, base_url, module):
+    """
+    Creates a pulp repo with a yum distributor and importer.
+
+    A lot of what is in here can be parameterized and put in the module
+    """
+    auth=(module.params.get('user'), module.params.get('password'))
+    url = "%s/pulp/api/v2/repositories/" % base_url
+    relative_url = "heighliner_repo/%s" % repo_id
+
+    if module.boolean(module.params.get('basic_auth')):
+        relative_url = "rpm/secure/%s" % repo_id
+
+    distributors = [
+        {
+            'distributor_id': 'yum_distributor',
+            'auto_publish': False,
+            'distributor_config': {
+                'http': True,
+                'https': True,
+                'relative_url': relative_url
+            },
+            'distributor_type_id': 'yum_distributor'
+        }
+    ]
+
+    data = {
+        'display_name': repo_id,
+        'description': 'Heighliner Repo',
+        'distributors': distributors,
+        'notes': { '_repo-type': 'rpm-repo' },
+        'importer_type_id': 'yum_importer',
+        'importer_config': {},
+        'id': repo_id
+    }
+
+    res = requests.post(url, data=json.dumps(data), verify=False, auth=auth)
+    if res.status_code == 409:
+        return dict(msg="Repo exists, skipping")
+
+    if res.status_code != 201:
+        module.fail_json(msg="Could not create repo: %s with args %s" % (_get_exit_response(res), data))
+
+    return dict()
+
+
+def _check_parents(base_url, module):
+    parents = module.params.get('inherit')
+
+    for repo in parents:
+        repo_exists, res = _get_repo(base_url, repo['name'], module)
+        if not repo_exists:
+            module.fail_json(msg="Can't inherit from %s http status code: %d" % (repo['name'], res.status_code))
+
+    return parents
+
+
+def _compose_repo(repo_name, base_url, module):
+    for repo in _check_parents(base_url, module):
+        _associate_units(repo['name'], repo_name, repo.get('include'), repo.get('include_dependencies'), base_url, module)
+        _unassociate_units(repo_name, repo.get('exclude'), base_url, module)
+    return dict()
+
+
+def main():
+    module = AnsibleModule(
+        argument_spec = dict(
+            user = dict(default='admin'),
+            password = dict(required=True),
+            server = dict(required=True),
+            use_https = dict(default='False', choices=['True','False'] + BOOLEANS),
+            basic_auth = dict(default='False', choices=['True','False'] + BOOLEANS),
+            append_version = dict(default='True', choices=['True','False'] + BOOLEANS),
+            repo_id = dict(required=True),
+            release_version = dict(required=False),
+            inherit = dict(required=True),
+            description = dict(default=''),
+            display_name = dict(default=None),
+            notes = dict(default={}),
+            distributors = dict(default=[]),
+            importer_type = dict(default='yum_importer'),
+            importer_config = dict(default={}),
+            sync_schedule = dict(default=None),
+            empty_include_result_fails = dict(default='True', choices=['True','False'] + BOOLEANS),
+            empty_exclude_result_fails = dict(default='True', choices=['True','False'] + BOOLEANS),
+            immutable = dict(default='False', choices=['True','False'] + BOOLEANS),
+            proposed = dict(default='True', choices=['True','False'] + BOOLEANS),
+            state = dict(default='present', choices=['present', 'absent']),
+        ),
+    )
+
+    protocol = 'http'
+    if module.boolean(module.params.get('use_https')):
+        protocol = 'https'
+
+    base_url = "%s://%s" % (protocol, module.params.get('server'))
+
+    if module.boolean(module.params.get('append_version')):
+        repo_tpl = "{0}-" + module.params.get('release_version')
+    else:
+        repo_tpl = "{0}"
+
+    if module.boolean(module.params.get('proposed')):
+        repo_tpl = repo_tpl + "_proposed"
+
+    repo_name = repo_tpl.format(module.params.get('repo_id'))
+
+    repo_exists, res = _get_repo(base_url, repo_name, module)
+    if module.boolean(module.params.get('immutable')) and repo_exists:
+        module.exit_json(changed=False, result="success")
+    elif repo_exists:
+        _delete_repo(base_url, repo_name, module)
+
+    if _check_parents(base_url, module):
+        _create_repo(repo_name, base_url, module)
+        _compose_repo(repo_name, base_url, module)
+        _publish_repo(repo_name, base_url, module)
+
+    module.exit_json(changed=True, result="success")
+
+# this is magic, see lib/ansible/module.params
+from ansible.module_utils.basic import *
+main()

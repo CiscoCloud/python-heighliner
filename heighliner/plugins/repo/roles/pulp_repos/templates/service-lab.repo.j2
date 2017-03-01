@@ -1,0 +1,15 @@
+[{{ nimbus_yml.service_repo_name }}-{{ nimbus_yml.version }}]
+baseurl = https://{{ pulp_server_name }}/pulp/repos/heighliner_repo/{{ item.item.base_name | default(nimbus_yml.service_repo_name) }}-{{ nimbus_yml.version }}{{ repo_state | default('') }}/
+metadata_expire = 86400
+{% if item.item.base_repo | default(False) | bool %}
+priority = 10
+{% elif nimbus_yml.type == 'service' %}
+priority = 5
+{% else %}
+priority = 99
+{% endif %}
+ui_repoid_vars = releasever basearch
+name = {{ site_repo }} (RPMs)
+gpgkey = file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
+enabled = 1
+gpgcheck = 0

@@ -1,0 +1,5 @@
+---
+- name: disable service repos
+  command: yum-config-manager --disable {{ item.base_name | default(nimbus_yml.service_repo_name) }}-{{ nimbus_yml.version }}
+  with_items: nimbus_yml.compose_repo
+  when: not item.base_repo | default(False) | bool

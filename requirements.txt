@@ -1,0 +1,7 @@
+PyYAML==3.11
+click==3.3
+wsgiref==0.1.2
+pylint==1.4.0
+requests
+testinfra
+pytest-xdist

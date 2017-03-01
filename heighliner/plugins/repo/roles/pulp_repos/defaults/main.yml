@@ -1,0 +1,14 @@
+---
+pulp_server_name: ccs-mirror-stg.cisco.com
+pulp_user: admin
+pulp_password: admin
+pulp_repo_action: compose
+pulp_repo_deploy: proposed
+cobbler_user: cobbler
+cobbler_pass: cobbler
+build_server_ip: "{{ ansible_default_ipv4.address }}"
+server: "{{ ansible_default_ipv4.address }}"
+pulp_repo_deploy: proposed
+pulp_repo_action: compose
+heighliner_pool_repos:
+  - heighliner-service-pool

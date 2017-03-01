@@ -1,0 +1,35 @@
+#cloud-config
+# vim:syntax=yaml
+hostname: {{ hostname }}
+debug: True
+disable_root: false
+# set manage_etc_hosts to false to avoid /etc/hosts file
+# appended with following line after every reboot
+# 127.0.0.1    <hostname>.cisco.com    <hostname>
+# cloud-init bug: https://bugs.launchpad.net/ubuntu/+source/maas/+bug/1087183
+manage_etc_hosts: false
+fs_setup:
+  - label: None,
+    filesystem: ext4
+    device: vdb
+    partition: auto
+mounts:
+  - [ vdb, /mnt, ext4, "defaults" ]
+# We need to add these boot commands to deal with this bug in cloud-init
+# that will allow DHCP to override static IP assignments on initial boot
+# https://bugs.launchpad.net/cloud-init/+bug/1225922
+bootcmd:
+  - ifdown eth0
+  - ifup eth0
+runcmd:
+  - setenforce 0
+  - systemctl disable NetworkManager
+  - sed -i 's/SELINUX=enforcing/SELINUX=disabled/g' /etc/selinux/config
+  - sed -i -e 's/without-password/yes/' /etc/ssh/sshd_config
+  - systemctl restart sshd.service
+  - rsync -a /var/ /mnt
+  - rm -rf /var
+  - mkdir /var
+  - sed -i 's/mnt/var/' /etc/fstab
+  - mount /var
+  - umount /mnt

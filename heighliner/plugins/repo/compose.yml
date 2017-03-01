@@ -1,0 +1,8 @@
+---
+- hosts: localhost
+  gather_facts: true
+  connection: local
+  vars_files:
+    - ["vars/{{ os_family }}.yml", "vars/default.yml"]
+  roles:
+    - pulp_repos

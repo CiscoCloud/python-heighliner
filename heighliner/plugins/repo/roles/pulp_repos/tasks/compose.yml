@@ -1,0 +1,35 @@
+---
+# - debug: var=nimbus_yml.compose_repo
+
+- name: compose pulp repos
+  pulp_compose:
+    user: "{{ pulp_user }}"
+    release_version: "{{ nimbus_yml.version | default('') }}"
+    password: "{{ pulp_password }}"
+    server: "{{ pulp_server_name }}"
+    use_https: "{{ item.use_https | default(True) }}"
+    basic_auth: "{{ item.basic_auth | default(False) }}"
+    repo_id: "{{ item.base_name | default(nimbus_yml.service_repo_name) }}"
+    inherit: "{{ item.inherit }}"
+    description: "{{ item.description | default('') }}"
+    notes: "{{ item.notes | default('') }}"
+    display_name: "{{ item.display_name | default(item.base_name) | default(nimbus_yml.service_repo_name)}}"
+    importer_type: "{{ item.importer_type | default('yum_importer') }}"
+    importer_config: "{{ item.importer_config | default({}) }}"
+    distributors: "{{ item.distributors | default([]) }}"
+    state: "{{ item.state | default('present') }}"
+    immutable: "{{ item.immutable | default(False) }}"
+    proposed: "{{ item.build_proposed | default(True) }}"
+    append_version: "{{ item.append_version | default(True) }}"
+    empty_include_result_fails: "{{ item.empty_include_result_fails | default(True) }}"
+    empty_exclude_result_fails: "{{ item.empty_exclude_result_fails | default(True) }}"
+  with_items: nimbus_yml.compose_repo
+
+- name: check that repos exist
+  pulp_exists:
+    user: "{{ pulp_user }}"
+    password: "{{ pulp_password }}"
+    server: "{{ pulp_server_name }}"
+    use_https: True
+    repo_id: "{{ item | default(None) }}"
+  with_items: nimbus_yml.use_repo

@@ -1,0 +1,19 @@
+- include: host.yml
+
+- hosts: 127.0.0.1
+  connection: local
+  roles:
+    - cobbler_additional_hosts
+
+- hosts: "{{ target }}"
+  gather_facts: true
+  vars_files:
+    - ["vars/{{ os_family }}.yml", "vars/default.yml"]
+  roles:
+    - { role: common, when: deploy_args.base_provision|bool }
+    - { role: interfaces, when: deploy_args.base_provision|bool }
+    - { role: hosts_file, when: deploy_args.base_provision|bool }
+    - { role: package_config, when: deploy_args.base_provision|bool }
+    - { role: provision, when: deploy_args.base_provision|bool }
+    - { role: puppet, when: deploy_args.base_provision|bool }
+    - { role: ntp, when: deploy_args.base_provision|bool }

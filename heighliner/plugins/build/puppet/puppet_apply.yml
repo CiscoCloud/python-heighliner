@@ -1,0 +1,83 @@
+---
+- hosts: '{{ target }}'
+  vars:
+    manifest: 'manifests/site.pp'
+    num_of_runs: 1
+    ignore_puppet_errors: 'true'
+    puppet_apply_cmd: "puppet apply -v --detailed-exitcodes --logdest console --logdest /var/log/puppet/`date +%m-%d-%y-%H:%M:%S`-run.log --show_diff --color=false --confdir . {{ manifest }}"
+  tasks:
+    - name: set manage_packages fact
+      set_fact: manage_packages=true
+      when: manage_packages is not defined
+
+    - name: yum clean all
+      shell: yum clean all
+      when: manage_packages
+
+    - name: update yum cache
+      shell: yum makecache fast
+      when: manage_packages
+
+    - name: Install data package (Debian)
+      apt: name=ccs-data-{{ data_package }} state=latest
+      when: 'ansible_os_family == "Debian" and manage_packages'
+
+    - name: Install data package (RedHat)
+      yum: name=ccs-data-{{ data_package }} state=latest
+      when: 'ansible_os_family == "RedHat" and manage_packages'
+
+    - name: Install service package (Debian)
+      apt: name=service-{{ service }} state=present
+      when: 'ansible_os_family == "Debian" and manage_packages'
+
+    - name: Install service package (RedHat)
+      yum: name=service-{{ service }} state=present
+      when: 'ansible_os_family == "RedHat" and manage_packages'
+
+    - name: Link global data files
+      file: src=/etc/puppet/data/hiera_data/{{ item }} dest=/opt/ccs/services/{{ service }}/data/{{ item }} state=link
+      with_items:
+        - site.yaml
+
+    - name: Set service_name facter facts
+      lineinfile: line="service_name={{ service }}" dest=/etc/facter/facts.d/service_name.txt create=yes state=present
+
+    - name: Set service_version facter facts
+      lineinfile: line="service_version={{ version }}" dest=/etc/facter/facts.d/service_version.txt create=yes state=present
+
+    - name: puppet apply
+      shell: "retry=0; last_run=0; until [ $retry -ge {{ num_of_runs }} ] ; do echo \"*** Puppet run number $retry ***\"; {{ puppet_apply_cmd }}; last_run=$?; echo \"*** Exit code from puppet run number $(($retry+1)) is $last_run ***\"; retry=$(($retry+1)); done; if [[ {{ ignore_puppet_errors }} == 'true' ]] || [[ {{ ignore_puppet_errors }} == 'True' ]] ; then echo \"*** Return 0 because ignore_puppet_errors = {{ ignore_puppet_errors }} ***\"; exit 0; else echo \"*** Exiting with value of last puppet run becuase ignore_puppet_errors = {{ ignore_puppet_errors }} ***\"; exit $last_run; fi"
+      ignore_errors: False
+      register: puppetout
+      args:
+        chdir: /opt/ccs/services/{{ service }}/puppet
+
+    - debug: var=puppetout.stdout_lines
+    - debug: var=puppetout.stderr
+    - debug: var=puppetout.rc
+
+    - name: Remove facter facts
+      file: name=/etc/facter/facts.d/{{ item }}.txt state=absent
+      with_items:
+        - service_name
+        - service_version
+
+    - name: Unlink global data files
+      file: src=/etc/puppet/data/hiera_data/{{ item }} dest=/opt/ccs/services/{{ service }}/data/{{ item }} state=absent
+      with_items:
+        - common.yaml
+        - site.yaml
+
+    - name: Uninstall packages (Debian)
+      apt: name={{ item }} state=absent
+      with_items:
+        - ccs-data-{{ data_package }}
+        - service-{{ service }}
+      when: 'ansible_os_family == "Debian" and manage_packages'
+
+    - name: Uninstall packages (RedHat)
+      yum: name={{ item }} state=absent
+      with_items:
+        - ccs-data-{{ data_package }}
+        - service-{{ service }}
+      when: 'ansible_os_family == "RedHat" and manage_packages'

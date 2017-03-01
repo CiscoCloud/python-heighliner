@@ -1,0 +1,24 @@
+---
+- include: cobbler_sync.yml
+  when: pulp_repo_action == 'reposync'
+
+- include: compose.yml
+  when: pulp_repo_action == 'compose'
+
+- include: promote.yml
+  when: pulp_repo_action == 'promote'
+
+- include: deploy.yml
+  when: pulp_repo_action == 'deploy' and pulp_repo_deploy == 'stable'
+
+- include: deploy.yml repo_state=_proposed
+  when: pulp_repo_action == 'deploy' and pulp_repo_deploy == 'proposed'
+
+- include: provision.yml
+  when: pulp_repo_action == 'provision' and pulp_repo_deploy == 'stable'
+
+- include: provision.yml repo_state=_proposed
+  when: pulp_repo_action == 'provision' and pulp_repo_deploy == 'proposed'
+
+- include: deprovision.yml
+  when: pulp_repo_action == 'deprovision'

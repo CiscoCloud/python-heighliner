@@ -1,0 +1,265 @@
+#!/usr/bin/python
+import time
+
+try:
+    import xmlrpclib
+except ImportError:
+    print("failed=True msg='xmlrpclib is required'")
+
+_cobbler_api = None
+
+def _connect(url, username, password):
+    global _cobbler_api
+    _cobbler_api = xmlrpclib.Server(url)
+    token = _cobbler_api.login(username, password)
+    if not token:
+        return False
+    return token
+
+def _logout():
+    global _cobbler_api
+    _cobbler_api.logout()
+
+def _compare_hash(src, dst):
+    if type(dst) != dict:
+        return False
+    for key in src:
+        if key in dst.keys() and src[key] == dst[key]:
+            continue
+        return False
+    return True
+
+############
+# system
+############
+def _system_exists(system):
+    global _cobbler_api
+    systems = _cobbler_api.find_system({"name": system})
+    if len(systems) == 1:
+        return True
+    return False
+# creates a repo and returns an id
+def _create_system(token):
+    global _cobbler_api
+    return _cobbler_api.new_system(token)
+def _update_system(token, system, settings={}, system_id=False):
+    global _cobbler_api
+    if _compare_hash(settings, _cobbler_api.get_system(system)):
+        return False
+    if not system_id:
+        system_id = _cobbler_api.get_system_handle(system, token)
+    _cobbler_api.modify_system(system_id, 'name', system, token)
+    if 'hostname' not in settings.keys():
+        settings['hostname'] = system
+    for setting in settings:
+        if setting == 'interfaces':
+            for interface, interface_values in settings[setting].iteritems():
+                props = {}
+                if interface == 'eth0':
+                    interface_values['management'] = True
+                for key, value in interface_values.items():
+                    props[key.replace('-','') + '-' + interface ] = value
+                _cobbler_api.modify_system(system_id, 'modify_interface', props, token)
+            continue
+        _cobbler_api.modify_system(system_id, setting, settings[setting], token)
+    _cobbler_api.save_system(system_id, token)
+    return True
+def _delete_system(token, system):
+    global _cobbler_api
+    _cobbler_api.remove_system(system, token)
+
+############
+# profile
+############
+def _profile_exists(profile):
+    global _cobbler_api
+    profiles = _cobbler_api.find_profile({"name": profile})
+    if len(profiles) == 1:
+        return True
+    return False
+# creates a repo and returns an id
+def _create_profile(token):
+    global _cobbler_api
+    return _cobbler_api.new_profile(token)
+def _update_profile(token, profile, settings={}, profile_id=False):
+    global _cobbler_api
+    if _compare_hash(settings, _cobbler_api.get_profile(profile)):
+        return False
+    if not profile_id:
+        profile_id = _cobbler_api.get_profile_handle(profile, token)
+    _cobbler_api.modify_profile(profile_id, 'name', profile, token)
+    for setting in settings:
+        _cobbler_api.modify_profile(profile_id, setting, settings[setting], token)
+    _cobbler_api.save_profile(profile_id, token)
+    return True
+def _delete_profile(token, profile):
+    global _cobbler_api
+    _cobbler_api.remove_profile(profile, token)
+
+############
+# distro
+############
+def _distro_exists(distro):
+    global _cobbler_api
+    distros = _cobbler_api.find_distro({"name": distro})
+    if len(distros) == 1:
+        return True
+    return False
+# creates a repo and returns an id
+def _create_distro(token):
+    global _cobbler_api
+    return _cobbler_api.new_distro(token)
+def _update_distro(token, distro, settings={}, distro_id=False, distro_dir='/var/www/cobbler/ks_mirror'):
+    global _cobbler_api
+    if _compare_hash(settings, _cobbler_api.get_distro(distro)):
+        return False
+    if not distro_id:
+        distro_id = _cobbler_api.get_distro_handle(distro, token)
+    _cobbler_api.modify_distro(distro_id, 'name', distro, token)
+    for setting in settings:
+        if setting == 'kernel' or setting == 'initrd':
+            if distro_dir not in settings[setting]:
+                settings[setting] = "%s/%s/%s" % (distro_dir, distro, settings[setting])
+        _cobbler_api.modify_distro(distro_id, setting, settings[setting], token)
+    _cobbler_api.save_distro(distro_id, token)
+    return True
+def _delete_distro(token, distro):
+    global _cobbler_api
+    _cobbler_api.remove_distro(distro, token)
+
+############
+# repo
+############
+def _repo_exists(repo):
+    global _cobbler_api
+    repos = _cobbler_api.find_repo({"name": repo})
+    if len(repos) == 1:
+        return True
+    return False
+# creates a repo and returns an id
+def _create_repo(token):
+    global _cobbler_api
+    return _cobbler_api.new_repo(token)
+def _update_repo(token, repo, settings={}, repo_id=False):
+    global _cobbler_api
+    if _compare_hash(settings, _cobbler_api.get_repo(repo)):
+        return False
+    if not repo_id:
+        repo_id = _cobbler_api.get_repo_handle(repo, token)
+    _cobbler_api.modify_repo(repo_id, 'name', repo, token)
+    for setting in settings:
+        _cobbler_api.modify_repo(repo_id, setting, settings[setting], token)
+    _cobbler_api.save_repo(repo_id, token)
+    return True
+def _delete_repo(token, repo):
+    global _cobbler_api
+    _cobbler_api.remove_profile(repo, token)
+
+def main():
+    module = AnsibleModule(
+        argument_spec = dict(
+            cobbler_user = dict(default='cobbler'),
+            cobbler_pass = dict(default='cobbler'),
+            cobbler_url = dict(default='http://localhost/cobbler_api'),
+            cobbler_settings = dict(default=None),
+            type = dict(required=True, choices=['repo','profile','distro','system']),
+            name = dict(required=True),
+            sync = dict(default=False),
+            reposync = dict(default=False),
+            background_reposync = dict(default=True),
+            state = dict(default='present', choices=['absent', 'present']),
+            distro_dir = dict(default='/var/www/cobbler/ks_mirror'),
+        ),
+    )
+    token = _connect(module.params['cobbler_url'], module.params['cobbler_user'], module.params['cobbler_pass'])
+    name = module.params['name']
+    default_kopts = 'netcfg/get_nameservers=173.37.87.157 \
+            netcfg/confirm_static=true \
+            netcfg/get_ipaddress={$eth0_ip-address} \
+            netcfg/get_gateway={$eth0_gateway} \
+            netcfg/get_netmask={$eth0_netmask} \
+            netcfg/disable_autoconfig=true \
+            netcfg/dhcp_options="Configure network manually" \
+            netcfg/no_default_route=false \
+            partman-auto/disk=/dev/sda \
+            netcfg/dhcp_failed=true'
+    if not token:
+        module.fail_json(msg="failed to login to cobbler")
+
+    if module.params['state'] == 'present':
+        _id = False
+        res = False
+        # add or update system
+        if module.params['type'] == 'system':
+            if not _system_exists(name):
+                _id = _create_system(token)
+            if 'kopts' not in module.params['cobbler_settings'].keys():
+                module.params['cobbler_settings']['kopts'] = default_kopts
+            res = _update_system(token, name, module.params['cobbler_settings'], _id)
+        # add or update distro
+        elif module.params['type'] == 'distro':
+            if not _distro_exists(name):
+                _id = _create_distro(token)
+            res = _update_distro(token, name, module.params['cobbler_settings'], _id, module.params['distro_dir'])
+        # add or update profile
+        elif module.params['type'] == 'profile':
+            if not _profile_exists(name):
+                _id = _create_profile(token)
+            res = _update_profile(token, name, module.params['cobbler_settings'], _id)
+        # add or update repo
+        elif module.params['type'] == 'repo':
+            if not _repo_exists(name):
+                _id = _create_repo(token)
+            res = _update_repo(token, name, module.params['cobbler_settings'], _id)
+    elif module.params['state'] == 'absent':
+        if module.params['type'] == 'system':
+            _delete_system(token, name) if _system_exists(name) else module.fail_json(msg="system doesn't exist")
+        if module.params['type'] == 'distro':
+            _delete_distro(token, name) if _distro_exists(name) else module.fail_json(msg="distro doesn't exist")
+        if module.params['type'] == 'profile':
+            _delete_profile(token, name) if _profile_exists(name) else module.fail_json(msg="profile doesn't exist")
+        if module.params['type'] == 'repo':
+            _delete_repo(token, name) if _repo_exists(name) else module.fail_json(msg="repo doesn't exist")
+        res = True
+
+    # perform a cobbler sync
+    if module.params['sync']:
+        try:
+            _cobbler_api.sync(token)
+            res = True
+        except:
+            module.fail_json(msg="cobbler sync failed")
+
+    if module.params['reposync'] and module.params['type'] == 'repo':
+        try:
+            reposync_event_id = _cobbler_api.background_reposync({"only": name}, token)
+
+            if not module.params['background_reposync']:
+                timeout = 60 * 30
+                start = time.time()
+                status = None
+
+                while status != 'complete':
+                    result = _cobbler_api.get_task_status(reposync_event_id)
+                    status = result[2]
+                    delta = time.time() - start
+                    if delta >= timeout:
+                        module.fail_json(msg="Timeout waiting for backgroud_reposync %d seconds" % timeout)
+                        break;
+                    if status == 'failed':
+                        module.fail_json(msg='Syncing repo %s failed..' % name)
+                        break;
+                    time.sleep(1)
+                res = True
+
+        except Exception as e:
+            module.fail_json(msg="cobbler reposync failed for %s %s" % (name, e))
+
+    # if result was true (changed), then exit changed, otherwise exit no change
+    if res:
+        module.exit_json(changed=True, result="success")
+    module.exit_json(changed=False, result="success")
+
+# this is magic, see lib/ansible/module.params
+from ansible.module_utils.basic import *
+main()

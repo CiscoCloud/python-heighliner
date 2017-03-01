@@ -1,0 +1,2 @@
+recursive-include heighliner/plugins *
+recursive-include heighliner/scripts *

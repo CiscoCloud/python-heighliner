@@ -1,0 +1,18 @@
+---
+- hosts: docker[0]
+  sudo: yes
+  tasks:
+    - name: copy docker build folder
+      copy: src="/opt/ccs/services/{{ service }}/docker" dest="/opt/ccs/services/{{ service }}"
+
+    - name: build image from dockerfile
+      docker_image: path="{{ docker_dir }}" name="service/{{ service }}" state=build
+
+    - name: stop existing service container(s)
+      docker: image="service/{{ service }}" state=absent
+
+    - name: deploy container from image
+      docker: image="service/{{ service }}" name="{{ service }}" ports="{{ docker_ports }}"
+
+    - name: remove docker build folder
+      file: path="{{ docker_dir }}" state=absent

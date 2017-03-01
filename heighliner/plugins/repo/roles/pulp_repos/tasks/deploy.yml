@@ -1,0 +1,77 @@
+---
+# The repo_state is intended to allow someone to specify what type of repos
+# should be deployed at a given site when heighliner deploy is run.
+
+- name: pulp server var
+  debug: var=pulp_server_name
+  run_once: true
+
+- name: check that secure repos exist
+  delegate_to: 127.0.0.1
+  run_once: true
+  pulp_exists:
+    user: "{{ pulp_user }}"
+    password: "{{ pulp_password }}"
+    server: "{{ pulp_server_name }}"
+    use_https: True
+    repo_id: "{{ item.base_name|default(nimbus_yml.service_repo_name) }}-{{ nimbus_yml.version }}{{ repo_state|default('') }}"
+  with_items: nimbus_yml.compose_repo
+  when: item.basic_auth is defined and item.basic_auth and (lookup('env', 'CCS_ENVIRONMENT') is defined and lookup('env', 'CCS_ENVIRONMENT') != 'dev-tenant')
+
+- name: check that repos exist
+  delegate_to: 127.0.0.1
+  run_once: true
+  pulp_exists:
+    user: "{{ pulp_user }}"
+    password: "{{ pulp_password }}"
+    server: "{{ pulp_server_name }}"
+    use_https: True
+    repo_id: "{{ item.base_name|default(nimbus_yml.service_repo_name) }}-{{ nimbus_yml.version }}{{ repo_state|default('') }}"
+  with_items: nimbus_yml.compose_repo
+  when: nimbus_yml.compose_repo is defined and item.basic_auth | default(False) == False and (lookup('env', 'CCS_ENVIRONMENT') is defined and lookup('env', 'CCS_ENVIRONMENT') != 'dev-tenant')
+
+- name: set secure cobbler repos
+  delegate_to: 127.0.0.1
+  run_once: true
+  cobbler:
+    cobbler_user: "{{ cobbler_user }}"
+    cobbler_pass: "{{ cobbler_pass }}"
+    cobbler_url: "http://{{ build_node_name }}/cobbler_api"
+    type: 'repo'
+    reposync: true
+    background_reposync: false
+    name: "{{ item.cobbler_mirror | default(item.base_name) | default(nimbus_yml.service_repo_name) }}-{{ nimbus_yml.version }}"
+    state: "{{ item.state | default('present') }}"
+    cobbler_settings:
+      arch: x86_64
+      mirror: "https://{{ sdlc_mirror_user }}:{{ sdlc_mirror_password }}@{{ pulp_server_name }}/rpm/secure/{{ item.base_name | default(nimbus_yml.service_repo_name) }}-{{ nimbus_yml.version }}{{ repo_state|default('') }}"
+      mirror_locally: true
+      breed: 'yum'
+      keep_updated: false
+      priority: 99
+  with_items: nimbus_yml.compose_repo
+  register: secure_repos
+  when: item.basic_auth is defined and item.basic_auth == True and (lookup('env', 'CCS_ENVIRONMENT') is defined and lookup('env', 'CCS_ENVIRONMENT') != 'dev-tenant')
+
+- name: set cobbler repos
+  delegate_to: 127.0.0.1
+  run_once: true
+  cobbler:
+    cobbler_user: "{{ cobbler_user }}"
+    cobbler_pass: "{{ cobbler_pass }}"
+    cobbler_url: "http://{{ build_node_name }}/cobbler_api"
+    type: 'repo'
+    reposync: true
+    background_reposync: false
+    name: "{{ item.cobbler_mirror | default(item.base_name) | default(nimbus_yml.service_repo_name) }}-{{ nimbus_yml.version }}"
+    state: "{{ item.state | default('present') }}"
+    cobbler_settings:
+      arch: x86_64
+      mirror: "https://{{ pulp_server_name }}/pulp/repos/heighliner_repo/{{ item.base_name|default(nimbus_yml.service_repo_name) }}-{{ nimbus_yml.version }}{{ repo_state|default('') }}"
+      mirror_locally: true
+      breed: 'yum'
+      keep_updated: false
+      priority: 99
+  with_items: nimbus_yml.compose_repo
+  register: registered_repos
+  when: nimbus_yml.compose_repo is defined and (item.basic_auth | default(False) == False) and (lookup('env', 'CCS_ENVIRONMENT') is defined and lookup('env', 'CCS_ENVIRONMENT') != 'dev-tenant')

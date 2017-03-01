@@ -1,0 +1,63 @@
+- name: "create fixed port"
+  neutron_port:
+    state: present
+    network_name: "{{ deploy_args.network_name }}"
+    subnet_name: "{{ deploy_args.subnet_name }}"
+    tenant_name: "{{ deploy_args.port_tenant | default(deploy_args.tenant) }}"
+    security_groups: "{{ deploy_args.security_groups }}"
+    ip_address: "{{ interfaces.eth0.ip_address }}"
+    allowed_address_pairs: "{{ deploy_args.allowed_address_pairs }}"
+    login_username: "{{ deploy_args.username }}"
+    login_password: "{{ deploy_args.password }}"
+    login_tenant_name: "{{ deploy_args.login_tenant | default(deploy_args.tenant) }}"
+    region_name: "{{ deploy_args.region }}"
+    auth_url: "{{ deploy_args.auth_url }}"
+  when: "'{{ virtual_state | default('present') }}' == 'present'"
+  register: port
+
+- name: "ensure keypair is present in nova"
+  nova_keypair:
+    name: "{{ deploy_args.key_name }}"
+    state: present
+    public_key: "{{ lookup('file','/root/.ssh/id_rsa.pub') }}"
+    login_username: "{{ deploy_args.username }}"
+    login_password: "{{ deploy_args.password }}"
+    login_tenant_name: "{{ deploy_args.tenant }}"
+    region_name: "{{ deploy_args.region }}"
+    auth_url: "{{ deploy_args.auth_url }}"
+  when: "'{{ virtual_state | default('present') }}' == 'present'"
+
+- name: "nova boot instance"
+  compute:
+    state: "{{ virtual_state | default('present') }}"
+    name: "{{ inventory_hostname }}"
+    image_name: "{{ deploy_args.image }}"
+    key_name: "{{ deploy_args.key_name }}"
+    flavor_include: "{{ deploy_args.flavor }}"
+    security_groups: "{{ deploy_args.security_groups }}"
+    user_data: "{{ userdata | default(lookup('template', userdata_template)) }}"
+    availability_zone: "{{ deploy_args.availability_zone | default('') }}"
+    nics: [port-id: "{{ port.id | default('') }}"]
+    config_drive: true
+    login_username: "{{ deploy_args.username }}"
+    login_password: "{{ deploy_args.password }}"
+    login_tenant_name: "{{ deploy_args.tenant }}"
+    region_name: "{{ deploy_args.region }}"
+    auth_url: "{{ deploy_args.auth_url }}"
+    meta: "{{ deploy_args.meta | default({}) }}"
+  register: instance
+
+- name: "wait for ssh server to listen"
+  wait_for:
+    host: "{{ interfaces.eth0.ip_address }}"
+    port: 22
+    delay: 15
+  when: instance|changed and '{{ virtual_state | default('present') }}' == 'present'
+
+- name: "try to connect via ssh"
+  command: "ssh -o BatchMode=yes -o ConnectTimeout=15 -o LogLevel=quiet -o StrictHostKeyChecking=no {{ interfaces.eth0.ip_address }} 'echo hi'"
+  register: result
+  until: result.stdout.find("hi") != -1
+  retries: 16
+  delay: 25
+  when: instance|changed and '{{ virtual_state | default('present') }}' == 'present'

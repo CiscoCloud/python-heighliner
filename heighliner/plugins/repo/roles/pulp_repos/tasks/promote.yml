@@ -1,0 +1,11 @@
+- name: promote pulp repos
+  pulp_promote:
+    user: "{{ pulp_user }}"
+    password: "{{ pulp_password }}"
+    server: "{{ pulp_server_name }}"
+    use_https: "{{ item.use_https | default(True) }}"
+    basic_auth: "{{ item.basic_auth | default(False) }}"
+    repo_id: "{{ item.base_name | default(nimbus_yml.service_repo_name) }}"
+    append_version: "{{ item.append_version | default(True) }}"
+    release_version: "{{ nimbus_yml.version | default(None) }}"
+  with_items: nimbus_yml.compose_repo

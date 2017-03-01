@@ -1,0 +1,3 @@
+---
+userdata_template: 'templates/userdata.txt.j2'
+remote_port: 22

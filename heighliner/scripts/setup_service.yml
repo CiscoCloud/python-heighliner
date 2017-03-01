@@ -1,0 +1,29 @@
+---
+- hosts: 127.0.0.1
+  vars:
+    service: ''
+    version: 'latest'
+    dev: false
+    gerrit_server: 'ccs-gerrit.cisco.com'
+    services_base: '/tmp/services'
+  tasks:
+    - name: Install service package (Debian)
+      apt: name=service-{{ service }} state=latest
+      when: ansible_os_family == "Debian" and version == "latest" and not dev|bool
+
+    - name: Install service package at version (Debian)
+      apt: name=service-{{ service }}-{{ version }} state=present
+      when: ansible_os_family == "Debian" and version != "latest" and not dev|bool
+
+    - name: Install service package (RedHat)
+      yum: name=service-{{ service }} state=latest
+      when: ansible_os_family == "RedHat" and version == "latest" and not dev|bool
+
+    - name: Install service package at version (RedHat)
+      yum: name=service-{{ service }}-{{ version }} state=present
+      when: ansible_os_family == "RedHat" and version != "latest" and not dev|bool
+
+    - name: Clone service repository (Dev)
+      git: repo=ssh://{{ gerrit_server }}:29418/service-{{ service }}.git
+           dest={{ services_base }}/service-{{ service }}
+      when: dev|bool

@@ -1,0 +1,55 @@
+#!/usr/bin/python
+
+import json
+import os
+try:
+    import requests
+except ImportError:
+    print("failed=True msg='requests module is required'")
+
+
+def _get_repo(base_url, repo_id, module):
+    url = "%s/pulp/api/v2/repositories/%s/?details=true" % (base_url, repo_id)
+    auth=(module.params.get('user'), module.params.get('password'))
+    req = requests.get(url, verify=False, auth=auth)
+    if req.status_code == 200:
+        result = json.loads(req.text)
+        if 'id' in result.keys() and result['id'] == repo_id:
+            return result
+    else:
+        return False
+
+
+def main():
+    module = AnsibleModule(
+        argument_spec = dict(
+            user = dict(default='admin'),
+            password = dict(required=True),
+            server = dict(required=True),
+            use_https = dict(default=True),
+            repo_id = dict(required=True),
+        ),
+    )
+
+    if module.params.get('repo_id') is None:
+        module.exit_json(changed=False, result='success')
+
+    protocol = 'http'
+    if module.params.get('use_https'):
+        protocol = 'https'
+
+    base_url = "%s://%s" % (protocol, module.params.get('server'))
+    repo_name = module.params.get('repo_id')
+
+    if not repo_name:
+        module.exit_json(changed=False, result="success")
+    if _get_repo(base_url, repo_name, module):
+        module.exit_json(changed=False, result="success")
+    else:
+        module.fail_json(msg="Repo %s does not exist in pulp. " \
+        "If this is a production or staging site, you must " \
+        "promote the repo before running the deploy." % repo_name)
+
+# this is magic, see lib/ansible/module.params
+from ansible.module_utils.basic import *
+main()

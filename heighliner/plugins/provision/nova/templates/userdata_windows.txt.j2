@@ -1,0 +1,7 @@
+#PS1
+$UserName = 'Administrator'
+$Password = "fm345932SDk2390s2"
+$ComputerName = "."
+$Account = [ADSI]"WinNT://$ComputerName/$UserName,user"
+$Account.SetPassword($Password)
+$Account.SetInfo()

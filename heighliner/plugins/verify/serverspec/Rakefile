@@ -1,0 +1,21 @@
+# WARNING:  Do not modify this file because it will be replaced by heighliner
+require 'rake'
+require 'rspec/core/rake_task'
+require 'yaml'
+
+properties = YAML.load_file('properties.yml')
+
+desc "Run serverspec to all hosts"
+task :spec => 'serverspec:all'
+
+namespace :serverspec do
+  task :all => properties.keys.map {|key| 'serverspec:' + key }
+  properties.keys.each do |key|
+    desc "Run serverspec for #{key}"
+    RSpec::Core::RakeTask.new(key.to_sym) do |t|
+      ENV['KEY'] = "#{key}"
+      t.pattern = (File.join(__dir__, 'spec/{' + properties[key][:spec].join(',') + '}/*_spec.rb'))
+      puts "*** Verify Role: #{key} ***"
+    end
+  end
+end

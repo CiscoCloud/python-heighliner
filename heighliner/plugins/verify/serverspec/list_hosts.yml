@@ -1,0 +1,7 @@
+# This dummy playbook is used for getting the list of play_hosts.
+# e.g. ansible-playbook list_hosts.yml --list-hosts -e "service=helloworld-ansible"
+---
+- hosts: "{{ service }}"
+  tasks:
+  - name: echo nothing
+    shell: echo ""

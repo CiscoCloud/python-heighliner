@@ -1,0 +1,6 @@
+---
+- name: yum clean
+  command: yum clean all
+
+- name: yum makecache
+  command: yum makecache fast

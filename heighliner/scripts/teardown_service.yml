@@ -1,0 +1,13 @@
+---
+- hosts: 127.0.0.1
+  vars:
+    dev: false
+    service: ''
+  tasks:
+    - name: Uninstall service package (Debian)
+      apt: name={{ service }} state=absent
+      when: ansible_os_family == "Debian" and not dev|bool
+
+    - name: Uninstall service package (RedHat)
+      yum: name={{ service }} state=absent
+      when: ansible_os_family == "RedHat" and not dev|bool

@@ -1,0 +1,3 @@
+---
+userdata_template: 'templates/userdata_windows.txt.j2'
+remote_port: 3389

@@ -1,0 +1,42 @@
+---
+- name: ensure yum priorities plugin is installed
+  yum: name=yum-plugin-priorities update_cache=yes
+
+- name: install httplib2
+  yum: name=python-httplib2 state=present
+
+- name: remove old repo file
+  file: name=/etc/yum.repos.d/{{ item.base_name | default(nimbus_yml.service_repo_name) }}.repo state=absent
+  with_items: nimbus_yml.compose_repo
+
+- uri: url=https://{{ pulp_server_name }}/pulp/repos/heighliner_repo/{{ item.base_name | default(nimbus_yml.service_repo_name) }}-{{ nimbus_yml.version }}{{ repo_state | default ('') }}/repodata/repomd.xml validate_certs=no
+  register: repo_exists
+  with_items: nimbus_yml.compose_repo
+  when: lookup('env', 'CCS_ENVIRONMENT') is defined and lookup('env', 'CCS_ENVIRONMENT') == 'dev-tenant'
+
+- uri: url=http://{{ server }}/cobbler/repo_mirror/{{ item.base_name | default(nimbus_yml.service_repo_name) }}-{{ nimbus_yml.version }}/repodata/repomd.xml validate_certs=no
+  register: cobbler_repo_exists
+  with_items: nimbus_yml.compose_repo
+  when: lookup('env', 'CCS_ENVIRONMENT') is defined and lookup('env', 'CCS_ENVIRONMENT') != 'dev-tenant'
+
+- debug: var=repo_exists
+
+- debug: var=cobbler_repo_exists
+
+- name: add servicelab repo
+  template: src=service-lab.repo.j2 dest=/etc/yum.repos.d/{{ item.item.base_name | default(nimbus_yml.service_repo_name) }}.repo
+  when: ansible_distribution == "RedHat" and item.status == 200
+  notify:
+    - yum clean
+    - yum makecache
+  with_items: repo_exists.results
+  when: lookup('env', 'CCS_ENVIRONMENT') is defined and lookup('env', 'CCS_ENVIRONMENT') == 'dev-tenant'
+
+- name: add service repo
+  template: src=service.repo.j2 dest=/etc/yum.repos.d/{{ item.item.base_name | default(nimbus_yml.service_repo_name) }}.repo
+  when: ansible_distribution == "RedHat" and item.status == 200
+  notify:
+    - yum clean
+    - yum makecache
+  with_items: cobbler_repo_exists.results
+  when: lookup('env', 'CCS_ENVIRONMENT') is defined and lookup('env', 'CCS_ENVIRONMENT') != 'dev-tenant'

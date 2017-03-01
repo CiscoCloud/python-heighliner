@@ -1,0 +1,18 @@
+---
+- name: sync heighliner cobbler repos
+  cobbler:
+    cobbler_user: "{{ cobbler_user }}"
+    cobbler_pass: "{{ cobbler_pass }}"
+    cobbler_url: "http://{{ build_node_name }}/cobbler_api"
+    type: 'repo'
+    reposync: true
+    background_reposync: false
+    name: "{{ item }}"
+    state: 'present'
+    cobbler_settings: {}
+  with_items: heighliner_pool_repos
+  run_once: true
+  register: registered_repos
+  notify:
+    - yum clean
+    - yum makecache
