@@ -1,4 +1,4 @@
-PyYAML==3.11
+pyyaml>=4.2b1
 click==3.3
 wsgiref==0.1.2
 pylint==1.4.0
